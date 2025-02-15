@@ -6,11 +6,13 @@ import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 
 const ddbDocClient = createDDbDocClient();
 
-export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {     // Note change
+export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
   try {
-    console.log("[EVENT]", JSON.stringify(event));
-    const pathParameters  = event?.pathParameters;
-    const movieId = pathParameters?.movieId ? parseInt(pathParameters.movieId) : undefined;
+    console.log("Event: ", event);
+    const parameters = event?.pathParameters;
+    const queryStringParameters = event?.queryStringParameters;
+    const movieId = parameters?.movieId ? parseInt(parameters.movieId) : undefined;
+    const includeCast = queryStringParameters?.cast === "true";
 
     if (!movieId) {
       return {
@@ -28,7 +30,9 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {    
         Key: { id: movieId },
       })
     );
+
     console.log("GetCommand response: ", commandOutput);
+
     if (!commandOutput.Item) {
       return {
         statusCode: 404,
@@ -38,19 +42,28 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {    
         body: JSON.stringify({ Message: "Invalid movie Id" }),
       };
     }
-    const body = {
-      data: commandOutput.Item,
-    };
 
-    // Return Response
+    const movieData = commandOutput.Item;
+    
+    if (includeCast) {
+      const castCommandOutput = await ddbDocClient.send(
+        new GetCommand({
+          TableName: process.env.TABLE_NAME,
+          Key: { id: movieId },
+        })
+      );
+      console.log("Cast GetCommand response: ", castCommandOutput);
+      movieData.cast = castCommandOutput.Item ? castCommandOutput.Item.cast : [];
+    }
+
     return {
       statusCode: 200,
       headers: {
         "content-type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ data: movieData }),
     };
-  } catch (error: any) {
+  } catch (error) {
     console.log(JSON.stringify(error));
     return {
       statusCode: 500,
